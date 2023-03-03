@@ -510,6 +510,154 @@ void Adafruit_GFX::fillCircleHelper(int16_t x0, int16_t y0, int16_t r,
   }
 }
 
+static constexpr const float deg_to_rad = 0.017453292519943295769236907684886;
+void Adafruit_GFX::drawEllipseArc(int32_t x, int32_t y, int32_t r0x, int32_t r1x, int32_t r0y, int32_t r1y, float start, float end, uint16_t color)
+{
+  if (r0x < r1x)
+    std::swap(r0x, r1x);
+  if (r0y < r1y)
+    std::swap(r0y, r1y);
+  if (r1x < 0)
+    return;
+  if (r1y < 0)
+    return;
+
+  bool equal = fabsf(start - end) < std::numeric_limits<float>::epsilon();
+  start = fmodf(start, 360);
+  end = fmodf(end, 360);
+  if (start < 0)
+    start += 360.0f;
+  if (end < 0)
+    end += 360.0f;
+
+  startWrite();
+  fill_arc_helper(x, y, r0x, r1x, r0y, r1y, start, start, color);
+  fill_arc_helper(x, y, r0x, r1x, r0y, r1y, end, end, color);
+  if (!equal && (fabsf(start - end) <= 0.0001f))
+  {
+    start = .0f;
+    end = 360.0f;
+  }
+  fill_arc_helper(x, y, r0x, r0x, r0y, r0y, start, end, color);
+  fill_arc_helper(x, y, r1x, r1x, r1y, r1y, start, end, color);
+  endWrite();
+}
+
+void Adafruit_GFX::fillEllipseArc(int32_t x, int32_t y, int32_t r0x, int32_t r1x, int32_t r0y, int32_t r1y, float start, float end, uint16_t color)
+{
+  if (r0x < r1x)
+    std::swap(r0x, r1x);
+  if (r0y < r1y)
+    std::swap(r0y, r1y);
+  if (r1x < 0)
+    return;
+  if (r1y < 0)
+    return;
+
+  bool equal = fabsf(start - end) < std::numeric_limits<float>::epsilon();
+  start = fmodf(start, 360);
+  end = fmodf(end, 360);
+  if (start < 0)
+    start += 360.0f;
+  if (end < 0)
+    end += 360.0f;
+  if (!equal && (fabsf(start - end) <= 0.0001f))
+  {
+    start = .0f;
+    end = 360.0f;
+  }
+
+  startWrite();
+  fill_arc_helper(x, y, r0x, r1x, r0y, r1y, start, end, color);
+  endWrite();
+}
+void Adafruit_GFX::fill_arc_helper(int32_t cx, int32_t cy, int32_t oradius_x, int32_t iradius_x, int32_t oradius_y, int32_t iradius_y, float start, float end, uint16_t color)
+{
+  float s_cos = (cosf(start * deg_to_rad));
+  float e_cos = (cosf(end * deg_to_rad));
+  float sslope = s_cos / (sinf(start * deg_to_rad));
+  float eslope = -1000000;
+  if (end != 360.0f)
+    eslope = e_cos / (sinf(end * deg_to_rad));
+  float swidth = 0.5f / s_cos;
+  float ewidth = -0.5f / e_cos;
+
+  bool start180 = !(start < 180);
+  bool end180 = end < 180;
+  bool reversed = start + 180 < end || (end < start && start < end + 180);
+
+  int32_t xleft = -oradius_x;
+  int32_t xright = oradius_x + 1;
+  int32_t y = -oradius_y;
+  int32_t ye = oradius_y;
+  if (!reversed)
+  {
+    if ((end >= 270 || end < 90) && (start >= 270 || start < 90))
+      xleft = 0;
+    else if (end < 270 && end >= 90 && start < 270 && start >= 90)
+      xright = 1;
+    if (end >= 180 && start >= 180)
+      ye = 0;
+    else if (end < 180 && start < 180)
+      y = 0;
+  }
+
+  bool trueCircle = (oradius_x == oradius_y) && (iradius_x == iradius_y);
+
+  int32_t iradius_y2 = iradius_y * (iradius_y - 1);
+  int32_t iradius_x2 = iradius_x * (iradius_x - 1);
+  float irad_rate = iradius_x2 && iradius_y2 ? (float)iradius_x2 / (float)iradius_y2 : 0;
+
+  int32_t oradius_y2 = oradius_y * (oradius_y + 1);
+  int32_t oradius_x2 = oradius_x * (oradius_x + 1);
+  float orad_rate = oradius_x2 && oradius_y2 ? (float)oradius_x2 / (float)oradius_y2 : 0;
+
+  do
+  {
+    int32_t y2 = y * y;
+    int32_t compare_o = oradius_y2 - y2;
+    int32_t compare_i = iradius_y2 - y2;
+    if (!trueCircle)
+    {
+      compare_i = floorf(compare_i * irad_rate);
+      compare_o = ceilf(compare_o * orad_rate);
+    }
+    int32_t xe = ceilf(sqrtf(compare_o));
+    int32_t x = 1 - xe;
+
+    if (x < xleft)
+      x = xleft;
+    if (xe > xright)
+      xe = xright;
+    float ysslope = (y + swidth) * sslope;
+    float yeslope = (y + ewidth) * eslope;
+    int len = 0;
+    do
+    {
+      bool flg1 = start180 != (x <= ysslope);
+      bool flg2 = end180 != (x <= yeslope);
+      int32_t x2 = x * x;
+      if (x2 >= compare_i && ((flg1 && flg2) || (reversed && (flg1 || flg2))) && x != xe && x2 < compare_o)
+      {
+        ++len;
+      }
+      else
+      {
+        if (len)
+        {
+          writeFastHLine(cx + x - len, cy + y, len, color);
+          len = 0;
+        }
+        if (x2 >= compare_o)
+          break;
+        if (x < 0 && x2 < compare_i)
+        {
+          x = -x;
+        }
+      }
+    } while (++x <= xe);
+  } while (++y <= ye);
+}
 /**************************************************************************/
 /*!
    @brief   Draw a rectangle with no fill color
